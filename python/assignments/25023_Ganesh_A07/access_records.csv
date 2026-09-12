@@ -1,0 +1,3 @@
+timestamp,user_id,endpoint,status_code
+2026-09-01 10:15:30,USR102,/api/v1/predict,200
+2026-09-01 10:16:12,USR105,/api/v1/train,500
