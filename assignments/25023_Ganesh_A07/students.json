@@ -1,0 +1,9 @@
+[
+    {
+        "id": 1,
+        "name": "Ram",
+        "course": "Python",
+        "marks": 70,
+        "grade": "B"
+    }
+]
