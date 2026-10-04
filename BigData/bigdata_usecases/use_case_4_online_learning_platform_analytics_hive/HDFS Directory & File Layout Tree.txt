@@ -1,0 +1,42 @@
+ONLINE LEARNING PLATFORM
+│
+├── LOCAL FILESYSTEM
+│   │
+│   └── ~/usecases/online_learning_platform/
+│       │
+│       └── local_data/
+│           ├── learners.csv
+│           ├── courses.csv
+│           └── enrollments.csv
+│
+│
+├── HDFS
+│   │
+│   └── /
+│       └── usecases/
+│           └── online_learning_platform/
+│               │
+│               └── raw/
+│                   ├── learners/
+│                   │   └── learners.csv
+│                   │
+│                   ├── courses/
+│                   │   └── courses.csv
+│                   │
+│                   └── enrollments/
+│                       └── enrollments.csv
+│
+│
+└── HIVE
+    │
+    └── Database: online_learning
+        │
+        ├── learners_managed
+        │   └── Managed Table
+        │
+        ├── courses_external
+        │   └── External Table
+        │
+        ├── enrollments
+           └── Managed Table
+  

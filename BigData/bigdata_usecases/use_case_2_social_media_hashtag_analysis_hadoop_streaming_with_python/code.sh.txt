@@ -1,0 +1,89 @@
+#!/bin/bash
+
+# ==========================================
+# USE CASE 2: Social Media Hashtag Analysis
+# Complete Automated Execution Script
+# ==========================================
+
+# 1. Create project directories locally
+mkdir -p social_media_hashtag_analysis/data/input
+mkdir -p social_media_hashtag_analysis/src
+cd social_media_hashtag_analysis
+
+# 2. Create sample input file
+cat << 'EOF' > social_posts.txt
+P1001 rahul #python #hadoop #bigdata
+P1002 priya #python #spark
+P1003 amit #hadoop #spark #bigdata
+P1004 neha #python #bigdata
+EOF
+
+# 3. Create Python Mapper script
+cat << 'EOF' > mapper.py
+import sys
+
+for line in sys.stdin:
+    if not line.strip():
+        continue
+    
+    parts = line.strip().split()
+    
+    for word in parts:
+        if word.startswith("#"):
+            print(f"{word}\t1")
+EOF
+
+# 4. Create Python Reducer script
+cat << 'EOF' > reducer.py
+import sys
+
+current_tag = None
+current_count = 0
+
+for line in sys.stdin:
+    if not line.strip():
+        continue
+    
+    parts = line.strip().split('\t')
+    
+    if len(parts) != 2:
+        continue
+        
+    tag, count = parts[0], int(parts[1])
+
+    if current_tag == tag:
+        current_count += count
+    else:
+        if current_tag:
+            print(f"{current_tag}\t{current_count}")
+        current_tag = tag
+        current_count = count
+
+if current_tag:
+    print(f"{current_tag}\t{current_count}")
+EOF
+
+# 5. Make python scripts executable
+chmod +x mapper.py reducer.py
+
+# 6. Upload data to HDFS
+echo "Uploading data to HDFS..."
+hdfs dfs -mkdir -p /usecases/social_media_hashtag_analysis/input
+hdfs dfs -put -f social_posts.txt /usecases/social_media_hashtag_analysis/input/
+
+# 7. Clean up previous output in HDFS if it exists
+hdfs dfs -rm -r -f /usecases/social_media_hashtag_analysis/output
+
+# 8. Run Hadoop Streaming Job
+echo "Running Hadoop Streaming job..."
+hadoop jar $HADOOP_HOME/share/hadoop/tools/lib/hadoop-streaming-*.jar \
+  -input /usecases/social_media_hashtag_analysis/input/social_posts.txt \
+  -output /usecases/social_media_hashtag_analysis/output \
+  -mapper "python3 mapper.py" \
+  -reducer "python3 reducer.py" \
+  -file mapper.py \
+  -file reducer.py
+
+# 9. Display Output Results
+echo "Job completed! Results from HDFS:"
+hdfs dfs -cat /usecases/social_media_hashtag_analysis/output/part-00000

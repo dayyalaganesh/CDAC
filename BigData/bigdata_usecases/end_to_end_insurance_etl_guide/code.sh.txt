@@ -1,0 +1,259 @@
+#!/bin/bash
+
+# Exit immediately if any command fails to prevent cascading errors
+set -e
+
+################################################################################
+# STEP 1: LOCAL DIRECTORY SETUP
+# Creates the necessary folder structure on the Linux file system.
+################################################################################
+echo "=== STEP 1: Creating Local Project Directories ==="
+mkdir -p ~/insurance_etl/source
+mkdir -p ~/insurance_etl/scripts
+mkdir -p ~/insurance_etl/hive
+mkdir -p ~/insurance_etl/logs
+
+################################################################################
+# STEP 2: GENERATING SAMPLE CSV DATA (2026)
+# Automatically creates sample source data files inside your local source directory.
+################################################################################
+echo "=== STEP 2: Generating Sample CSV Data ==="
+
+# Customers dataset
+cat << 'EOF' > ~/insurance_etl/source/customers.csv
+customer_id,name,city,state,dob
+101,Rahul,Bangalore,Karnataka,1998-04-10
+102,Priya,Chennai,Tamil Nadu,1995-07-22
+103,Amit,Mumbai,Maharashtra,1990-11-15
+104,Sneha,Delhi,Delhi,1997-02-18
+105,Arjun,Hyderabad,Telangana,1992-09-30
+EOF
+
+# Policies dataset
+cat << 'EOF' > ~/insurance_etl/source/policies.csv
+policy_id,customer_id,policy_type,premium,start_date,end_date
+P1001,101,Health,25000,2026-01-01,2026-12-31
+P1002,102,Auto,18000,2026-02-01,2027-01-31
+P1003,103,Health,30000,2026-01-15,2026-12-31
+P1004,104,Life,45000,2026-03-01,2027-02-28
+P1005,105,Auto,20000,2026-01-10,2026-12-31
+EOF
+
+# Claims dataset
+cat << 'EOF' > ~/insurance_etl/source/claims.csv
+claim_id,policy_id,claim_date,claim_amount,status
+C001,P1001,2026-03-10,50000,Approved
+C002,P1002,2026-04-15,30000,Rejected
+C003,P1003,2026-05-20,75000,Approved
+C004,P1004,2026-06-11,100000,Pending
+C005,P1005,2026-07-05,25000,Approved
+C006,P1001,2026-08-10,15000,Approved
+EOF
+
+################################################################################
+# STEP 3: DYNAMIC LOAD DATE DEFINITION & HDFS SETUP
+# Captures current system date and creates date-partitioned HDFS folders 
+# for customers, policies, and claims.
+################################################################################
+echo "=== STEP 3: Setting Load Date and Creating HDFS Partition Structure ==="
+
+# Capture current system date dynamically (e.g., 2026-10-03)
+LOAD_DATE=$(date +%Y-%m-%d)
+echo "Current Incremental Load Date: $LOAD_DATE"
+
+# Create daily partitioned folders in HDFS for all entities
+hdfs dfs -mkdir -p /insurance/raw/customers/load_date=$LOAD_DATE
+hdfs dfs -mkdir -p /insurance/raw/policies/load_date=$LOAD_DATE
+hdfs dfs -mkdir -p /insurance/raw/claims/load_date=$LOAD_DATE
+
+################################################################################
+# STEP 4: UPLOAD CSV FILES TO HDFS PARTITIONS
+# Pushes local flat files directly into their respective daily load partitions.
+################################################################################
+echo "=== STEP 4: Uploading Files to HDFS Daily Partitions ==="
+hdfs dfs -put -f ~/insurance_etl/source/customers.csv /insurance/raw/customers/load_date=$LOAD_DATE/
+hdfs dfs -put -f ~/insurance_etl/source/policies.csv /insurance/raw/policies/load_date=$LOAD_DATE/
+hdfs dfs -put -f ~/insurance_etl/source/claims.csv /insurance/raw/claims/load_date=$LOAD_DATE/
+
+################################################################################
+# STEP 5: HIVE ETL PIPELINE EXECUTION (WITH CURRENT DATE BINDING)
+# Passes the LOAD_DATE variable into Hive so it processes only current date data 
+# and writes out Parquet files partitioned by the load date.
+################################################################################
+echo "=== STEP 5: Running Hive DDL and ETL Pipeline for Date: $LOAD_DATE ==="
+hive --hiveconf LOAD_DATE=$LOAD_DATE <<EOF
+
+-- 5.1 Database Creation
+CREATE DATABASE IF NOT EXISTS insurance_raw;
+CREATE DATABASE IF NOT EXISTS insurance_staging;
+CREATE DATABASE IF NOT EXISTS insurance_dw;
+
+-- 5.2 Raw External Tables (All partitioned by load_date for daily tracking)
+USE insurance_raw;
+
+CREATE EXTERNAL TABLE IF NOT EXISTS customers_raw (
+    customer_id INT,
+    name STRING,
+    city STRING,
+    state STRING,
+    dob STRING
+)
+PARTITIONED BY (load_date STRING)
+ROW FORMAT DELIMITED FIELDS TERMINATED BY ','
+STORED AS TEXTFILE
+LOCATION '/insurance/raw/customers'
+TBLPROPERTIES ("skip.header.line.count"="1");
+
+CREATE EXTERNAL TABLE IF NOT EXISTS policies_raw (
+    policy_id STRING,
+    customer_id INT,
+    policy_type STRING,
+    premium DOUBLE,
+    start_date STRING,
+    end_date STRING
+)
+PARTITIONED BY (load_date STRING)
+ROW FORMAT DELIMITED FIELDS TERMINATED BY ','
+STORED AS TEXTFILE
+LOCATION '/insurance/raw/policies'
+TBLPROPERTIES ("skip.header.line.count"="1");
+
+CREATE EXTERNAL TABLE IF NOT EXISTS claims_raw (
+    claim_id STRING,
+    policy_id STRING,
+    claim_date STRING,
+    claim_amount DOUBLE,
+    status STRING
+)
+PARTITIONED BY (load_date STRING)
+ROW FORMAT DELIMITED FIELDS TERMINATED BY ','
+STORED AS TEXTFILE
+LOCATION '/insurance/raw/claims'
+TBLPROPERTIES ("skip.header.line.count"="1");
+
+-- Automatically discover and register new daily HDFS partitions in Hive metadata
+MSCK REPAIR TABLE customers_raw;
+MSCK REPAIR TABLE policies_raw;
+MSCK REPAIR TABLE claims_raw;
+
+-- 5.3 Staging Tables & Cleanse Layer (Filtering strictly for current load date data)
+USE insurance_staging;
+
+CREATE TABLE IF NOT EXISTS customers_stg AS
+SELECT 
+    customer_id, 
+    TRIM(name) AS name, 
+    TRIM(city) AS city, 
+    TRIM(state) AS state, 
+    CAST(dob AS DATE) AS dob
+FROM insurance_raw.customers_raw 
+WHERE load_date = '${hiveconf:LOAD_DATE}' AND customer_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS policies_stg AS
+SELECT 
+    TRIM(policy_id) AS policy_id, 
+    customer_id, 
+    TRIM(policy_type) AS policy_type, 
+    CAST(premium AS DECIMAL(12,2)) AS premium, 
+    CAST(start_date AS DATE) AS start_date, 
+    CAST(end_date AS DATE) AS end_date
+FROM insurance_raw.policies_raw 
+WHERE load_date = '${hiveconf:LOAD_DATE}' AND policy_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS claims_stg AS
+SELECT 
+    TRIM(claim_id) AS claim_id, 
+    TRIM(policy_id) AS policy_id, 
+    CAST(claim_date AS DATE) AS claim_date, 
+    CAST(claim_amount AS DECIMAL(12,2)) AS claim_amount, 
+    UPPER(TRIM(status)) AS status
+FROM insurance_raw.claims_raw 
+WHERE load_date = '${hiveconf:LOAD_DATE}' AND claim_id IS NOT NULL;
+
+-- 5.4 Data Warehouse Dimensions & Fact Tables (Stored as Parquet with Current Date Partitions)
+USE insurance_dw;
+
+-- Customer Dimension Table (Partitioned by current load date as Parquet)
+CREATE TABLE IF NOT EXISTS dim_customer (
+    customer_key BIGINT, 
+    customer_id INT, 
+    customer_name STRING, 
+    city STRING, 
+    state STRING, 
+    dob DATE
+)
+PARTITIONED BY (load_date STRING)
+STORED AS PARQUET;
+
+SET hive.exec.dynamic.partition.mode=nonstrict;
+
+INSERT INTO dim_customer PARTITION (load_date)
+SELECT 
+    ROW_NUMBER() OVER (ORDER BY customer_id) AS customer_key, 
+    customer_id, 
+    name, 
+    city, 
+    state, 
+    dob,
+    '${hiveconf:LOAD_DATE}' AS load_date
+FROM insurance_staging.customers_stg;
+
+-- Policy Dimension Table (Partitioned by current load date as Parquet)
+CREATE TABLE IF NOT EXISTS dim_policy (
+    policy_key BIGINT, 
+    policy_id STRING, 
+    customer_id INT, 
+    policy_type STRING, 
+    premium DECIMAL(12,2), 
+    start_date DATE, 
+    end_date DATE
+)
+PARTITIONED BY (load_date STRING)
+STORED AS PARQUET;
+
+INSERT INTO dim_policy PARTITION (load_date)
+SELECT 
+    ROW_NUMBER() OVER (ORDER BY policy_id) AS policy_key, 
+    policy_id, 
+    customer_id, 
+    policy_type, 
+    premium, 
+    start_date, 
+    end_date,
+    '${hiveconf:LOAD_DATE}' AS load_date
+FROM insurance_staging.policies_stg;
+
+-- Claims Fact Table (Multi-partitioned by claim_year and load_date as Parquet)
+CREATE TABLE IF NOT EXISTS fact_claim (
+    claim_key BIGINT, 
+    claim_id STRING, 
+    customer_key BIGINT, 
+    policy_key BIGINT, 
+    date_key INT, 
+    claim_amount DECIMAL(12,2), 
+    status STRING, 
+    claim_to_premium_ratio DECIMAL(15,4)
+)
+PARTITIONED BY (claim_year INT, load_date STRING)
+STORED AS PARQUET;
+
+-- Load Fact Table with current date tracking
+INSERT INTO fact_claim PARTITION (claim_year, load_date)
+SELECT
+    ROW_NUMBER() OVER (ORDER BY c.claim_id) AS claim_key,
+    c.claim_id,
+    dc.customer_key,
+    dp.policy_key,
+    CAST(DATE_FORMAT(c.claim_date, 'yyyyMMdd') AS INT) AS date_key,
+    c.claim_amount,
+    c.status,
+    CAST(c.claim_amount / dp.premium AS DECIMAL(15,4)) AS claim_to_premium_ratio,
+    YEAR(c.claim_date) AS claim_year,
+    '${hiveconf:LOAD_DATE}' AS load_date
+FROM insurance_staging.claims_stg c
+JOIN insurance_dw.dim_policy dp ON c.policy_id = dp.policy_id AND dp.load_date = '${hiveconf:LOAD_DATE}'
+JOIN insurance_dw.dim_customer dc ON dp.customer_id = dc.customer_id AND dc.load_date = '${hiveconf:LOAD_DATE}';
+
+EOF
+
+echo "=== DAILY INCREMENTAL PARQUET PIPELINE COMPLETED SUCCESSFULLY! ==="

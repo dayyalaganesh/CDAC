@@ -1,0 +1,773 @@
+#!/bin/bash
+
+# ============================================================
+# USE CASE 4
+# ONLINE LEARNING PLATFORM ANALYTICS USING HIVE
+# ============================================================
+#
+# Concepts covered:
+# 1. Local data creation
+# 2. HDFS upload
+# 3. Start Hive
+# 4. Managed table
+# 5. External table
+# 6. LOAD DATA LOCAL INPATH
+# 7. LOAD DATA INPATH
+# 8. INNER JOIN
+# 9. LEFT JOIN
+# 10. FULL OUTER JOIN
+# 11. MAP-SIDE JOIN
+# 12. REDUCE-SIDE / COMMON JOIN
+# 13. Partitioned table
+# 14. Dynamic partitioning
+# 15. Partition pruning
+# 16. Partition + JOIN
+# 17. Business analytics
+#
+# ============================================================
+
+
+# ============================================================
+# PART 1: CREATE LOCAL PROJECT DIRECTORY
+# ============================================================
+
+mkdir -p ~/usecases/online_learning_platform/local_data
+mkdir -p ~/usecases/online_learning_platform/hive
+
+
+# ============================================================
+# PART 2: CREATE LOCAL DATA FILES
+# ============================================================
+
+
+# ------------------------------------------------------------
+# learners.csv
+# ------------------------------------------------------------
+
+cat > ~/usecases/online_learning_platform/local_data/learners.csv <<'EOF'
+learner_id,learner_name,email
+L001,Rahul,rahul@example.com
+L002,Anita,anita@example.com
+L003,Kiran,kiran@example.com
+L004,Priya,priya@example.com
+L005,Arjun,arjun@example.com
+L006,Sneha,sneha@example.com
+L007,Vijay,vijay@example.com
+L008,Meena,meena@example.com
+EOF
+
+
+# ------------------------------------------------------------
+# courses.csv
+# ------------------------------------------------------------
+
+cat > ~/usecases/online_learning_platform/local_data/courses.csv <<'EOF'
+course_id,course_name,category
+C101,Python Programming,Programming
+C102,SQL Fundamentals,Database
+C103,Data Engineering,Big Data
+C104,Machine Learning,AI
+C105,Cloud Computing,Cloud
+C106,Power BI,Analytics
+EOF
+
+
+# ------------------------------------------------------------
+# enrollments.csv
+# ------------------------------------------------------------
+
+cat > ~/usecases/online_learning_platform/local_data/enrollments.csv <<'EOF'
+enrollment_id,learner_id,course_id,enrollment_date
+E001,L001,C101,2026-09-01
+E002,L001,C102,2026-09-02
+E003,L002,C101,2026-09-03
+E004,L002,C103,2026-09-04
+E005,L003,C102,2026-09-05
+E006,L003,C104,2026-09-06
+E007,L004,C101,2026-09-07
+E008,L005,C103,2026-09-08
+E009,L005,C104,2026-09-09
+E010,L006,C101,2026-09-10
+E011,L006,C102,2026-09-11
+E012,L007,C103,2026-09-12
+E013,L007,C105,2026-09-13
+E014,L002,C104,2026-09-14
+EOF
+
+
+# ============================================================
+# PART 3: VERIFY LOCAL DATA
+# ============================================================
+
+echo "===== LOCAL DATA ====="
+
+echo "--- learners.csv ---"
+cat ~/usecases/online_learning_platform/local_data/learners.csv
+
+echo
+echo "--- courses.csv ---"
+cat ~/usecases/online_learning_platform/local_data/courses.csv
+
+echo
+echo "--- enrollments.csv ---"
+cat ~/usecases/online_learning_platform/local_data/enrollments.csv
+
+
+# ============================================================
+# PART 4: CREATE HDFS DIRECTORIES
+# ============================================================
+
+hdfs dfs -mkdir -p \
+/usecases/online_learning_platform/raw/learners \
+/usecases/online_learning_platform/raw/courses \
+/usecases/online_learning_platform/raw/enrollments
+
+
+# ============================================================
+# PART 5: UPLOAD LOCAL DATA TO HDFS
+# ============================================================
+
+hdfs dfs -put -f \
+~/usecases/online_learning_platform/local_data/learners.csv \
+/usecases/online_learning_platform/raw/learners/
+
+hdfs dfs -put -f \
+~/usecases/online_learning_platform/local_data/courses.csv \
+/usecases/online_learning_platform/raw/courses/
+
+hdfs dfs -put -f \
+~/usecases/online_learning_platform/local_data/enrollments.csv \
+/usecases/online_learning_platform/raw/enrollments/
+
+
+# ============================================================
+# PART 6: VERIFY HDFS DATA
+# ============================================================
+
+echo
+echo "===== HDFS DATA ====="
+
+hdfs dfs -ls -R /usecases/online_learning_platform/raw
+
+
+# ============================================================
+# PART 7: CREATE HDFS LOAD DIRECTORY
+#
+# Why?
+#
+# LOAD DATA INPATH moves the HDFS source file.
+#
+# We want to keep the raw enrollment file untouched.
+# Therefore we create a copy for the LOAD DATA INPATH operation.
+# ============================================================
+
+hdfs dfs -mkdir -p \
+/usecases/online_learning_platform/load/enrollments
+
+hdfs dfs -cp \
+/usecases/online_learning_platform/raw/enrollments/enrollments.csv \
+/usecases/online_learning_platform/load/enrollments/
+
+
+# ============================================================
+# PART 8: START HIVE
+# ============================================================
+#
+# Start HiveServer2 if it is not already running.
+#
+# Example:
+#
+# hiveserver2 > ~/hiveserver2.log 2>&1 &
+#
+# Then connect using:
+#
+# beeline -u jdbc:hive2://localhost:10001
+#
+# ============================================================
+
+
+# ============================================================
+# FROM HERE:
+# RUN THE FOLLOWING HIVE COMMANDS IN BEELINE
+# ============================================================
+
+
+# ============================================================
+# QUESTION 1
+# Create a Hive database for the online learning platform.
+# ============================================================
+
+CREATE DATABASE IF NOT EXISTS online_learning;
+
+USE online_learning;
+
+
+# ============================================================
+# QUESTION 2
+#
+# Create a MANAGED table for learner information.
+#
+# Requirement:
+# learner_id
+# learner_name
+# email
+# ============================================================
+
+DROP TABLE IF EXISTS learners_managed;
+
+CREATE TABLE learners_managed (
+    learner_id STRING,
+    learner_name STRING,
+    email STRING
+)
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY ','
+TBLPROPERTIES ("skip.header.line.count"="1");
+
+
+# ============================================================
+# QUESTION 3
+#
+# Load the learner data from the LOCAL filesystem.
+#
+# Notice LOCAL.
+#
+# LOCAL = local filesystem
+# ============================================================
+
+LOAD DATA LOCAL INPATH
+'~/usecases/online_learning_platform/local_data/learners.csv'
+INTO TABLE learners_managed;
+
+
+# ============================================================
+# QUESTION 4
+#
+# Verify the managed learners table.
+# ============================================================
+
+SELECT * FROM learners_managed;
+
+
+# ============================================================
+# QUESTION 5
+#
+# Create an EXTERNAL table for course information.
+#
+# The course data already exists in HDFS.
+# ============================================================
+
+DROP TABLE IF EXISTS courses_external;
+
+CREATE EXTERNAL TABLE courses_external (
+    course_id STRING,
+    course_name STRING,
+    category STRING
+)
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY ','
+LOCATION '/usecases/online_learning_platform/raw/courses'
+TBLPROPERTIES ("skip.header.line.count"="1");
+
+
+# ============================================================
+# QUESTION 6
+#
+# Verify the external courses table.
+# ============================================================
+
+SELECT * FROM courses_external;
+
+
+# ============================================================
+# QUESTION 7
+#
+# Create a MANAGED enrollment table.
+#
+# This table will be populated using LOAD DATA INPATH.
+# ============================================================
+
+DROP TABLE IF EXISTS enrollments;
+
+CREATE TABLE enrollments (
+    enrollment_id STRING,
+    learner_id STRING,
+    course_id STRING,
+    enrollment_date DATE
+)
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY ','
+TBLPROPERTIES ("skip.header.line.count"="1");
+
+
+# ============================================================
+# QUESTION 8
+#
+# Load enrollment data from HDFS.
+#
+# No LOCAL keyword.
+#
+# Therefore:
+# INPATH = HDFS
+# ============================================================
+
+LOAD DATA INPATH
+'/usecases/online_learning_platform/load/enrollments/enrollments.csv'
+INTO TABLE enrollments;
+
+
+# ============================================================
+# QUESTION 9
+#
+# Verify enrollment data.
+# ============================================================
+
+SELECT * FROM enrollments;
+
+
+# ============================================================
+# QUESTION 10 - INNER JOIN
+#
+# Find all learners who are enrolled in a course.
+#
+# Display:
+# learner_id
+# learner_name
+# course_id
+# enrollment_date
+# ============================================================
+
+SELECT
+    l.learner_id,
+    l.learner_name,
+    e.course_id,
+    e.enrollment_date
+FROM learners_managed l
+INNER JOIN enrollments e
+ON l.learner_id = e.learner_id;
+
+
+# ============================================================
+# QUESTION 11 - INNER JOIN
+#
+# Find the course name associated with each enrollment.
+#
+# Tables:
+# enrollments
+# courses_external
+# ============================================================
+
+SELECT
+    e.enrollment_id,
+    e.learner_id,
+    e.course_id,
+    c.course_name,
+    e.enrollment_date
+FROM enrollments e
+INNER JOIN courses_external c
+ON e.course_id = c.course_id;
+
+
+# ============================================================
+# QUESTION 12 - THREE TABLE INNER JOIN
+#
+# Find:
+#
+# learner_id
+# learner_name
+# course_id
+# course_name
+# enrollment_date
+#
+# Tables:
+# learners_managed
+# enrollments
+# courses_external
+# ============================================================
+
+SELECT
+    l.learner_id,
+    l.learner_name,
+    e.course_id,
+    c.course_name,
+    e.enrollment_date
+FROM learners_managed l
+INNER JOIN enrollments e
+ON l.learner_id = e.learner_id
+INNER JOIN courses_external c
+ON e.course_id = c.course_id;
+
+
+# ============================================================
+# QUESTION 13 - LEFT JOIN
+#
+# Find learners who have NOT enrolled in any course.
+# ============================================================
+
+SELECT
+    l.learner_id,
+    l.learner_name
+FROM learners_managed l
+LEFT JOIN enrollments e
+ON l.learner_id = e.learner_id
+WHERE e.enrollment_id IS NULL;
+
+
+# ============================================================
+# QUESTION 14 - LEFT JOIN
+#
+# Find courses that have NO learners enrolled.
+# ============================================================
+
+SELECT
+    c.course_id,
+    c.course_name
+FROM courses_external c
+LEFT JOIN enrollments e
+ON c.course_id = e.course_id
+WHERE e.learner_id IS NULL;
+
+
+# ============================================================
+# QUESTION 15 - FULL OUTER JOIN
+#
+# Find all learners and all enrollment records,
+# including unmatched records from either side.
+# ============================================================
+
+SELECT
+    l.learner_id,
+    l.learner_name,
+    e.enrollment_id,
+    e.course_id,
+    e.enrollment_date
+FROM learners_managed l
+FULL OUTER JOIN enrollments e
+ON l.learner_id = e.learner_id;
+
+
+# ============================================================
+# QUESTION 16 - MAP-SIDE JOIN
+#
+# Scenario:
+#
+# enrollments = large fact table
+# courses_external = small reference table
+#
+# Load the small courses table into mapper memory.
+# ============================================================
+
+SELECT /*+ MAPJOIN(c) */
+    e.enrollment_id,
+    e.learner_id,
+    e.course_id,
+    c.course_name,
+    e.enrollment_date
+FROM enrollments e
+JOIN courses_external c
+ON e.course_id = c.course_id;
+
+
+# ============================================================
+# QUESTION 17 - REDUCE-SIDE / COMMON JOIN
+#
+# Perform a normal JOIN without the MAPJOIN hint.
+#
+# Hive can use a shuffle/reduce-based join when
+# Map-Side Join is not applicable.
+# ============================================================
+
+SELECT
+    e.enrollment_id,
+    e.learner_id,
+    e.course_id,
+    c.course_name,
+    e.enrollment_date
+FROM enrollments e
+JOIN courses_external c
+ON e.course_id = c.course_id;
+
+
+# ============================================================
+# QUESTION 18
+#
+# Check the execution plan of the normal JOIN.
+# ============================================================
+
+EXPLAIN
+SELECT
+    e.enrollment_id,
+    e.learner_id,
+    e.course_id,
+    c.course_name
+FROM enrollments e
+JOIN courses_external c
+ON e.course_id = c.course_id;
+
+
+# ============================================================
+# QUESTION 19
+#
+# Create a PARTITIONED enrollment table.
+#
+# Partition by enrollment_date.
+#
+# Why?
+#
+# Queries filtering by enrollment_date can process only
+# the required partitions instead of scanning everything.
+# ============================================================
+
+DROP TABLE IF EXISTS enrollments_partitioned;
+
+CREATE TABLE enrollments_partitioned (
+    enrollment_id STRING,
+    learner_id STRING,
+    course_id STRING
+)
+PARTITIONED BY (
+    enrollment_date DATE
+)
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY ',';
+
+
+# ============================================================
+# QUESTION 20
+#
+# Enable dynamic partitioning.
+# ============================================================
+
+SET hive.exec.dynamic.partition = true;
+
+SET hive.exec.dynamic.partition.mode = nonstrict;
+
+
+# ============================================================
+# QUESTION 21
+#
+# Insert enrollment data into the partitioned table.
+#
+# enrollment_date becomes the partition column.
+# ============================================================
+
+INSERT INTO TABLE enrollments_partitioned
+PARTITION (enrollment_date)
+SELECT
+    enrollment_id,
+    learner_id,
+    course_id,
+    enrollment_date
+FROM enrollments;
+
+
+# ============================================================
+# QUESTION 22
+#
+# Show all partitions.
+# ============================================================
+
+SHOW PARTITIONS enrollments_partitioned;
+
+
+# ============================================================
+# QUESTION 23
+#
+# Query only one partition.
+#
+# Find enrollments on 2026-09-01.
+# ============================================================
+
+SELECT *
+FROM enrollments_partitioned
+WHERE enrollment_date = '2026-09-01';
+
+
+# ============================================================
+# QUESTION 24
+#
+# Query multiple required partitions.
+#
+# Find enrollments from September 1 to September 5.
+# ============================================================
+
+SELECT
+    enrollment_id,
+    learner_id,
+    course_id,
+    enrollment_date
+FROM enrollments_partitioned
+WHERE enrollment_date
+BETWEEN '2026-09-01' AND '2026-09-05';
+
+
+# ============================================================
+# QUESTION 25 - PARTITION + JOIN
+#
+# Find learners who enrolled on 2026-09-01.
+# ============================================================
+
+SELECT
+    l.learner_id,
+    l.learner_name,
+    p.course_id,
+    p.enrollment_date
+FROM enrollments_partitioned p
+JOIN learners_managed l
+ON p.learner_id = l.learner_id
+WHERE p.enrollment_date = '2026-09-01';
+
+
+# ============================================================
+# QUESTION 26 - PARTITION + TWO JOINS
+#
+# Find:
+#
+# learner name
+# course name
+# enrollment date
+#
+# for enrollments on 2026-09-01.
+# ============================================================
+
+SELECT
+    l.learner_id,
+    l.learner_name,
+    c.course_name,
+    p.enrollment_date
+FROM enrollments_partitioned p
+JOIN learners_managed l
+ON p.learner_id = l.learner_id
+JOIN courses_external c
+ON p.course_id = c.course_id
+WHERE p.enrollment_date = '2026-09-01';
+
+
+# ============================================================
+# QUESTION 27 - BUSINESS ANALYTICS
+#
+# Which courses have the highest number of enrollments?
+# ============================================================
+
+SELECT
+    c.course_id,
+    c.course_name,
+    COUNT(e.enrollment_id) AS enrollment_count
+FROM courses_external c
+LEFT JOIN enrollments e
+ON c.course_id = e.course_id
+GROUP BY
+    c.course_id,
+    c.course_name
+ORDER BY enrollment_count DESC;
+
+
+# ============================================================
+# QUESTION 28 - BUSINESS ANALYTICS
+#
+# How many courses has each learner enrolled in?
+# ============================================================
+
+SELECT
+    l.learner_id,
+    l.learner_name,
+    COUNT(e.enrollment_id) AS enrollment_count
+FROM learners_managed l
+LEFT JOIN enrollments e
+ON l.learner_id = e.learner_id
+GROUP BY
+    l.learner_id,
+    l.learner_name
+ORDER BY enrollment_count DESC;
+
+
+# ============================================================
+# QUESTION 29 - BUSINESS ANALYTICS
+#
+# Which learners have not enrolled in any course?
+# ============================================================
+
+SELECT
+    l.learner_id,
+    l.learner_name
+FROM learners_managed l
+LEFT JOIN enrollments e
+ON l.learner_id = e.learner_id
+WHERE e.enrollment_id IS NULL;
+
+
+# ============================================================
+# QUESTION 30 - BUSINESS ANALYTICS
+#
+# Which courses currently have no learners?
+# ============================================================
+
+SELECT
+    c.course_id,
+    c.course_name
+FROM courses_external c
+LEFT JOIN enrollments e
+ON c.course_id = e.course_id
+WHERE e.enrollment_id IS NULL;
+
+
+# ============================================================
+# QUESTION 31 - FINAL BUSINESS REPORT
+#
+# Display:
+#
+# learner
+# course
+# category
+# enrollment date
+#
+# for every valid enrollment.
+# ============================================================
+
+SELECT
+    l.learner_id,
+    l.learner_name,
+    c.course_id,
+    c.course_name,
+    c.category,
+    e.enrollment_date
+FROM learners_managed l
+JOIN enrollments e
+ON l.learner_id = e.learner_id
+JOIN courses_external c
+ON e.course_id = c.course_id
+ORDER BY e.enrollment_date;
+
+
+# ============================================================
+# QUESTION 32 - TABLE INFORMATION
+#
+# Check table definitions.
+# ============================================================
+
+DESCRIBE learners_managed;
+
+DESCRIBE courses_external;
+
+DESCRIBE enrollments;
+
+DESCRIBE enrollments_partitioned;
+
+
+# ============================================================
+# QUESTION 33 - VERIFY TABLE TYPES
+# ============================================================
+
+SHOW TABLES;
+
+
+# ============================================================
+# QUESTION 34 - VERIFY PARTITIONS
+# ============================================================
+
+SHOW PARTITIONS enrollments_partitioned;
+
+
+# ============================================================
+# END OF USE CASE
+# ============================================================

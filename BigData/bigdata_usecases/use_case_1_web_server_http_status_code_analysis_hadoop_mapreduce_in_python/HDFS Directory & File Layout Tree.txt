@@ -1,0 +1,15 @@
+LOCAL MACHINE DIRECTORY (e.g., ~/usecases/social_media_hashtag_analysis/)
+│
+├── social_posts.txt          <-- Local sample input file[cite: 1]
+├── mapper.py                 <-- Python mapper script
+└── reducer.py                <-- Python reducer script
+
+
+HDFS DIRECTORY (/usecases/social_media_hashtag_analysis/)
+│
+├── input/
+│   └── social_posts.txt      <-- Raw social posts data uploaded to HDFS[cite: 1]
+│
+└── output/
+    ├── _SUCCESS              <-- Marker file indicating successful job completion
+    └── part-00000            <-- Final aggregated hashtag counts[cite: 1]

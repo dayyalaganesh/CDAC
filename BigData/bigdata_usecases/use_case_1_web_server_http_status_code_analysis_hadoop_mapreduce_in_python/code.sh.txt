@@ -1,0 +1,84 @@
+#!/bin/bash
+
+# Exit immediately if a command exits with a non-zero status
+set -e
+
+echo "=== Step 1: Setting up local directory and files ==="
+mkdir -p web_log_analysis
+cd web_log_analysis
+
+# Create input data file
+cat << 'EOF' > web_logs.txt
+192.168.1.10 GET /home 200
+192.168.1.11 GET /login 200
+192.168.1.12 GET /product 404
+192.168.1.13 GET /home 200
+192.168.1.14 GET /checkout 500
+192.168.1.15 GET /product 404
+192.168.1.16 GET /home 200
+192.168.1.17 GET /server 500
+EOF
+
+# Create mapper script
+cat << 'EOF' > mapper.py
+#!/usr/bin/env python3
+import sys
+
+for line in sys.stdin:
+    parts = line.strip().split()
+    if len(parts) >= 4:
+        status_code = parts[3]
+        print(f"{status_code}\t1")
+EOF
+
+# Create reducer script
+cat << 'EOF' > reducer.py
+#!/usr/bin/env python3
+import sys
+
+current_code = None
+current_count = 0
+
+for line in sys.stdin:
+    parts = line.strip().split('\t')
+    if len(parts) != 2:
+        continue
+
+    code, count = parts[0], int(parts[1])
+
+    if current_code == code:
+        current_count += count
+    else:
+        if current_code:
+            print(f"{current_code}\t{current_count}")
+        current_code = code
+        current_count = count
+
+if current_code:
+    print(f"{current_code}\t{current_count}")
+EOF
+
+# Make python scripts executable
+chmod +x mapper.py reducer.py
+
+echo "=== Step 2: Preparing HDFS directories and uploading input ==="
+hdfs dfs -mkdir -p /user/hadoop/input
+# Remove file from HDFS first if it already exists to avoid errors
+hdfs dfs -rm -f /user/hadoop/input/web_logs.txt
+hdfs dfs -put web_logs.txt /user/hadoop/input/
+
+echo "=== Step 3: Cleaning up old HDFS output if exists ==="
+hdfs dfs -rm -r -f /user/hadoop/output_status_codes
+
+echo "=== Step 4: Running Hadoop Streaming Job ==="
+# Find the Hadoop streaming jar path automatically or fallback to standard path
+STREAMING_JAR=$(find $HADOOP_HOME/share/hadoop/tools/lib/ -name "hadoop-streaming-*.jar" | head -n 1)
+
+hadoop jar "$STREAMING_JAR" \
+  -file mapper.py -mapper "python3 mapper.py" \
+  -file reducer.py -reducer "python3 reducer.py" \
+  -input /user/hadoop/input/web_logs.txt \
+  -output /user/hadoop/output_status_codes
+
+echo "=== Step 5: Job Complete! Displaying Results ==="
+hdfs dfs -cat /user/hadoop/output_status_codes/part-00000
