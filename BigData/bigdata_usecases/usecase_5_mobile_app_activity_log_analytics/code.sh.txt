@@ -1,0 +1,389 @@
+#!/bin/bash
+
+# ============================================================
+# MOBILE APP ACTIVITY LOG ANALYTICS
+# Complete End-to-End Script
+#
+# Technologies:
+# Local Linux → HDFS → Hive → Python Transformation
+# ============================================================
+
+
+# ============================================================
+# STEP 1: CREATE LOCAL PROJECT DIRECTORIES
+# ============================================================
+
+PROJECT_DIR="/home/ganesh/usecases/mobile_app_activity"
+
+mkdir -p "$PROJECT_DIR"
+mkdir -p "$PROJECT_DIR/input"
+mkdir -p "$PROJECT_DIR/scripts"
+mkdir -p "$PROJECT_DIR/sql"
+
+cd "$PROJECT_DIR" || exit 1
+
+
+# ============================================================
+# STEP 2: CREATE RAW MOBILE ACTIVITY LOG
+# ============================================================
+
+cat > "$PROJECT_DIR/input/mobile_activity.log" <<'EOF'
+U101	john doe	login	Android	2026-10-01	5
+U102	alice smith	click	iOS	2026-10-01	12
+U101	john doe	purchase	Android	2026-10-01	20
+U103	Bob Jones	login	iOS	2026-10-01	3
+U102	alice smith	logout	iOS	2026-10-01	2
+U104	mary_white	click	Android	2026-10-01	15
+EOF
+
+
+# ============================================================
+# STEP 3: CHECK LOCAL RAW DATA
+# ============================================================
+
+echo ""
+echo "===== LOCAL RAW DATA ====="
+cat "$PROJECT_DIR/input/mobile_activity.log"
+
+echo ""
+echo "===== LOCAL PROJECT STRUCTURE ====="
+find "$PROJECT_DIR" -maxdepth 2 -type f
+
+
+# ============================================================
+# STEP 4: CREATE PYTHON TRANSFORMATION SCRIPT
+# ============================================================
+
+cat > "$PROJECT_DIR/scripts/standardize_names.py" <<'PYEOF'
+#!/usr/bin/env python3
+
+import sys
+
+for line in sys.stdin:
+    line = line.strip()
+
+    if not line:
+        continue
+
+    parts = line.split("\t", 1)
+
+    if len(parts) != 2:
+        continue
+
+    user_id, user_name = parts
+
+    standardized_name = user_name.upper()
+
+    print(user_id + "\t" + standardized_name)
+PYEOF
+
+chmod +x "$PROJECT_DIR/scripts/standardize_names.py"
+
+
+# ============================================================
+# STEP 5: TEST PYTHON SCRIPT LOCALLY
+# ============================================================
+
+echo ""
+echo "===== PYTHON SCRIPT TEST ====="
+
+printf 'U101\tjohn doe\nU102\talice smith\n\n' \
+| python3 "$PROJECT_DIR/scripts/standardize_names.py"
+
+
+# ============================================================
+# STEP 6: CREATE HDFS DIRECTORIES
+# ============================================================
+
+echo ""
+echo "===== CREATING HDFS DIRECTORIES ====="
+
+hdfs dfs -mkdir -p /usecases/mobile_activity/raw
+hdfs dfs -mkdir -p /usecases/mobile_activity/scripts
+hdfs dfs -mkdir -p /usecases/mobile_activity/output
+
+
+# ============================================================
+# STEP 7: UPLOAD RAW DATA TO HDFS
+# ============================================================
+
+echo ""
+echo "===== UPLOADING RAW DATA TO HDFS ====="
+
+hdfs dfs -put -f \
+"$PROJECT_DIR/input/mobile_activity.log" \
+/usecases/mobile_activity/raw/
+
+
+# ============================================================
+# STEP 8: UPLOAD PYTHON SCRIPT TO HDFS
+# ============================================================
+
+echo ""
+echo "===== UPLOADING PYTHON SCRIPT TO HDFS ====="
+
+hdfs dfs -put -f \
+"$PROJECT_DIR/scripts/standardize_names.py" \
+/usecases/mobile_activity/scripts/
+
+
+# ============================================================
+# STEP 9: VERIFY HDFS DATA
+# ============================================================
+
+echo ""
+echo "===== HDFS DIRECTORY STRUCTURE ====="
+
+hdfs dfs -ls -R /usecases/mobile_activity
+
+
+echo ""
+echo "===== HDFS RAW DATA ====="
+
+hdfs dfs -cat \
+/usecases/mobile_activity/raw/mobile_activity.log
+
+
+# ============================================================
+# STEP 10: CREATE HIVE SQL SCRIPT
+# ============================================================
+
+cat > "$PROJECT_DIR/sql/mobile_activity_usecase.sql" <<'SQLEOF'
+
+-- ============================================================
+-- MOBILE APP ACTIVITY LOG ANALYTICS
+-- ============================================================
+
+
+-- ------------------------------------------------------------
+-- 1. CREATE DATABASE
+-- ------------------------------------------------------------
+
+CREATE DATABASE IF NOT EXISTS mobile_activity;
+
+USE mobile_activity;
+
+
+-- ------------------------------------------------------------
+-- 2. CREATE EXTERNAL TABLE
+-- ------------------------------------------------------------
+
+DROP TABLE IF EXISTS mobile_activity_logs;
+
+CREATE EXTERNAL TABLE mobile_activity_logs (
+    user_id STRING,
+    user_name STRING,
+    event_type STRING,
+    device_type STRING,
+    event_date DATE,
+    session_duration INT
+)
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY '\t'
+STORED AS TEXTFILE
+LOCATION '/usecases/mobile_activity/raw';
+
+
+-- ------------------------------------------------------------
+-- 3. CHECK TABLE
+-- ------------------------------------------------------------
+
+DESCRIBE mobile_activity_logs;
+
+
+-- ------------------------------------------------------------
+-- 4. DISPLAY RAW DATA
+-- ------------------------------------------------------------
+
+SELECT *
+FROM mobile_activity_logs
+WHERE user_id IS NOT NULL;
+
+
+-- ------------------------------------------------------------
+-- 5. TOTAL VALID RECORDS
+-- ------------------------------------------------------------
+
+SELECT
+    COUNT(*) AS total_records
+FROM mobile_activity_logs
+WHERE user_id IS NOT NULL;
+
+
+-- ------------------------------------------------------------
+-- 6. DISTINCT ACTIVE USERS
+-- ------------------------------------------------------------
+
+SELECT
+    COUNT(DISTINCT user_id) AS active_users
+FROM mobile_activity_logs
+WHERE user_id IS NOT NULL;
+
+
+-- ------------------------------------------------------------
+-- 7. UNIQUE USERS BY EVENT TYPE
+-- ------------------------------------------------------------
+
+SELECT
+    event_type,
+    COUNT(DISTINCT user_id) AS unique_users
+FROM mobile_activity_logs
+WHERE user_id IS NOT NULL
+GROUP BY event_type
+ORDER BY unique_users DESC;
+
+
+-- ------------------------------------------------------------
+-- 8. OVERALL AVERAGE SESSION DURATION
+-- ------------------------------------------------------------
+
+SELECT
+    AVG(session_duration) AS average_session_duration
+FROM mobile_activity_logs
+WHERE user_id IS NOT NULL;
+
+
+-- ------------------------------------------------------------
+-- 9. EVENT COUNT BY EVENT TYPE
+-- ------------------------------------------------------------
+
+SELECT
+    event_type,
+    COUNT(*) AS event_count
+FROM mobile_activity_logs
+WHERE user_id IS NOT NULL
+GROUP BY event_type
+ORDER BY event_count DESC;
+
+
+-- ------------------------------------------------------------
+-- 10. ACTIVE USERS BY DEVICE TYPE
+-- ------------------------------------------------------------
+
+SELECT
+    device_type,
+    COUNT(DISTINCT user_id) AS active_users
+FROM mobile_activity_logs
+WHERE user_id IS NOT NULL
+GROUP BY device_type;
+
+
+-- ------------------------------------------------------------
+-- 11. AVERAGE SESSION DURATION BY DEVICE
+-- ------------------------------------------------------------
+
+SELECT
+    device_type,
+    AVG(session_duration) AS average_session_duration
+FROM mobile_activity_logs
+WHERE user_id IS NOT NULL
+GROUP BY device_type;
+
+
+-- ------------------------------------------------------------
+-- 12. AVERAGE SESSION DURATION BY EVENT TYPE
+-- ------------------------------------------------------------
+
+SELECT
+    event_type,
+    AVG(session_duration) AS average_session_duration
+FROM mobile_activity_logs
+WHERE user_id IS NOT NULL
+GROUP BY event_type;
+
+
+-- ============================================================
+-- PYTHON TRANSFORMATION
+-- ============================================================
+
+
+-- ------------------------------------------------------------
+-- 13. ADD PYTHON SCRIPT
+-- ------------------------------------------------------------
+
+ADD FILE hdfs:///usecases/mobile_activity/scripts/standardize_names.py;
+
+
+-- ------------------------------------------------------------
+-- 14. STANDARDIZE USER NAMES
+-- ------------------------------------------------------------
+
+SELECT TRANSFORM(user_id, user_name)
+USING 'python3 standardize_names.py'
+AS (
+    user_id STRING,
+    standardized_name STRING
+)
+FROM mobile_activity_logs
+WHERE user_id IS NOT NULL;
+
+
+-- ============================================================
+-- END
+-- ============================================================
+
+SQLEOF
+
+
+# ============================================================
+# STEP 11: DISPLAY THE COMPLETE HIVE SQL SCRIPT
+# ============================================================
+
+echo ""
+echo "===== HIVE SQL SCRIPT ====="
+
+cat "$PROJECT_DIR/sql/mobile_activity_usecase.sql"
+
+
+# ============================================================
+# STEP 12: RUN COMPLETE HIVE USE CASE
+# ============================================================
+
+echo ""
+echo "===== RUNNING HIVE USE CASE ====="
+
+beeline -u jdbc:hive2://localhost:10001 \
+-f "$PROJECT_DIR/sql/mobile_activity_usecase.sql"
+
+
+# ============================================================
+# STEP 13: FINAL HDFS CHECK
+# ============================================================
+
+echo ""
+echo "===== FINAL HDFS STRUCTURE ====="
+
+hdfs dfs -ls -R /usecases/mobile_activity
+
+
+# ============================================================
+# COMPLETE
+# ============================================================
+
+echo ""
+echo "============================================================"
+echo " MOBILE APP ACTIVITY USE CASE COMPLETED"
+echo "============================================================"
+
+echo ""
+echo "Local project:"
+echo "$PROJECT_DIR"
+
+echo ""
+echo "HDFS raw data:"
+echo "/usecases/mobile_activity/raw/mobile_activity.log"
+
+echo ""
+echo "HDFS Python script:"
+echo "/usecases/mobile_activity/scripts/standardize_names.py"
+
+echo ""
+echo "Hive database:"
+echo "mobile_activity"
+
+echo ""
+echo "Hive table:"
+echo "mobile_activity_logs"
+
+echo ""
+echo "============================================================"

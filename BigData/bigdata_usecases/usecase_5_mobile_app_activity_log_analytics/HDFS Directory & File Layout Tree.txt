@@ -1,0 +1,37 @@
+MOBILE APP ACTIVITY LOG ANALYTICS
+│
+├── Local Project
+│   └── /home/ganesh/usecases/mobile_app_activity/
+│       │
+│       ├── input/
+│       │   └── mobile_activity.log
+│       │
+│       ├── scripts/
+│       │   └── standardize_names.py
+│       │
+│       └── sql/
+│           └── mobile_activity_usecase.sql
+│
+│
+├── HDFS
+│   └── /usecases/mobile_activity/
+│       │
+│       ├── raw/
+│       │   └── mobile_activity.log
+│       │
+│       └── scripts/
+│           └── standardize_names.py
+│
+│
+└── Hive
+    │
+    └── Database: mobile_activity
+        │
+        └── Table: mobile_activity_logs
+            │
+            ├── user_id
+            ├── user_name
+            ├── event_type
+            ├── device_type
+            ├── event_date
+            └── session_duration
