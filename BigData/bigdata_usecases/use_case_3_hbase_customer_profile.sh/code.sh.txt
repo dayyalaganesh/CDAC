@@ -1,0 +1,42 @@
+#!/bin/bash
+
+# ==========================================
+# 1. START HDFS SERVICES
+# ==========================================
+echo "Starting Hadoop HDFS..."
+start-dfs.sh
+
+# ==========================================
+# 2. RUN HBASE COMMANDS
+# ==========================================
+echo "Running HBase Customer 360 script..."
+
+cat << 'EOF' | hbase shell
+
+# Create table with column families 'personal' and 'account'[cite: 1]
+create 'customer_profiles', 'personal', 'account'
+
+# Insert customer record (RowKey = CUST1001)[cite: 1]
+put 'customer_profiles', 'CUST1001', 'personal:name', 'Rahul Sharma'
+put 'customer_profiles', 'CUST1001', 'personal:city', 'Hyderabad'
+put 'customer_profiles', 'CUST1001', 'account:plan', 'Postpaid-5G'
+put 'customer_profiles', 'CUST1001', 'account:status', 'ACTIVE'
+
+# Retrieve customer details quickly[cite: 1]
+get 'customer_profiles', 'CUST1001'
+
+# Scan all profiles[cite: 1]
+scan 'customer_profiles'
+
+EOF
+
+# ==========================================
+# 3. STOP SERVICES (QUIT)
+# ==========================================
+echo "Stopping HBase..."
+stop-hbase.sh
+
+echo "Stopping Hadoop HDFS..."
+stop-dfs.sh
+
+echo "All services successfully stopped."

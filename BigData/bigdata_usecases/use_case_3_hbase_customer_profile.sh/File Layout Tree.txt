@@ -1,0 +1,8 @@
+hbase
+└── table: customer_profiles
+    ├── column family: personal
+    │   ├── column: name (Value: Rahul Sharma)
+    │   └── column: city (Value: Hyderabad)
+    └── column family: account
+        ├── column: plan (Value: Postpaid-5G)
+        └── column: status (Value: ACTIVE)
