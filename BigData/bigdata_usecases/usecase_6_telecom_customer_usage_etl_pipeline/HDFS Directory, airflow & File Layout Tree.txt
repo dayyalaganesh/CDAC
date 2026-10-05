@@ -1,0 +1,73 @@
+TELECOM CUSTOMER USAGE ETL PIPELINE
+
+LOCAL PROJECT
+/home/ganesh/usecases/telecom_customer_usage/
+│
+├── input/
+│   └── telecom_usage.csv
+│
+└── sql/
+    ├── 01_create_telecom_raw_table.sql
+    └── 02_create_telecom_final_table.sql
+
+
+AIRFLOW
+/home/ganesh/airflow/
+│
+└── dags/
+    └── telecom_usage_dag.py
+
+DAG ID
+telecom_usage_etl
+
+
+HDFS
+/usecases/telecom_customer_usage/
+│
+└── raw/
+    └── telecom_usage.csv
+
+
+HIVE
+Database:
+telecom_db
+
+Tables:
+├── telecom_usage_raw
+│   └── External table
+│       └── Reads CSV from HDFS raw directory
+│
+└── telecom_usage_final
+    └── Managed table
+        └── Contains transformed data
+        └── Adds usage_category
+
+
+AIRFLOW TASKS
+
+1. upload_to_hdfs
+   └── Local CSV
+       ↓
+       HDFS /usecases/telecom_customer_usage/raw/
+
+
+2. create_raw_table
+   └── Executes:
+       01_create_telecom_raw_table.sql
+       ↓
+       Creates telecom_db.telecom_usage_raw
+       ↓
+       External table points to HDFS raw directory
+
+
+3. create_final_table
+   └── Executes:
+       02_create_telecom_final_table.sql
+       ↓
+       Reads telecom_usage_raw
+       ↓
+       Applies:
+       data_gb >= 10 → HIGH
+       data_gb < 10  → NORMAL
+       ↓
+       Creates telecom_usage_final

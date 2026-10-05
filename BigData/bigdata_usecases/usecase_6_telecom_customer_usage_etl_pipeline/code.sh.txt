@@ -1,0 +1,312 @@
+# ============================================================
+# USE CASE 6 — TELECOM CUSTOMER USAGE ETL PIPELINE
+# ============================================================
+
+
+# ============================================================
+# 1. CREATE PROJECT DIRECTORIES
+# ============================================================
+
+mkdir -p ~/usecases/telecom_customer_usage/input
+mkdir -p ~/usecases/telecom_customer_usage/sql
+
+
+# ============================================================
+# 2. CREATE INPUT CSV
+# ============================================================
+
+nano ~/usecases/telecom_customer_usage/input/telecom_usage.csv
+
+# Paste:
+
+usage_id,customer_id,plan,call_minutes,sms_count,data_gb,usage_date,circle
+U001,C101,Premium,450,120,8.5,2026-09-25,Bangalore
+U002,C102,Basic,120,45,2.3,2026-09-25,Mysore
+U003,C103,Premium,620,180,15.2,2026-09-25,Bangalore
+U004,C104,Basic,210,60,4.5,2026-09-26,Chennai
+U005,C105,Premium,580,150,10.5,2026-09-26,Hyderabad
+U006,C106,Basic,95,30,1.8,2026-09-26,Mangalore
+U007,C107,Premium,710,220,18.7,2026-09-27,Bangalore
+U008,C108,Basic,165,55,6.2,2026-09-27,Mysore
+U009,C109,Premium,490,135,9.9,2026-09-27,Chennai
+U010,C110,Basic,250,75,10.0,2026-09-28,Hyderabad
+U011,C111,Premium,530,160,12.4,2026-09-28,Bangalore
+U012,C112,Basic,140,40,3.7,2026-09-28,Mangalore
+U013,C113,Premium,680,200,20.1,2026-09-29,Chennai
+U014,C114,Basic,190,65,7.5,2026-09-29,Mysore
+U015,C115,Premium,455,110,9.5,2026-09-29,Hyderabad
+
+# Save:
+# Ctrl + O
+# Enter
+# Ctrl + X
+
+
+# ============================================================
+# 3. VERIFY CSV
+# ============================================================
+
+head -3 ~/usecases/telecom_customer_usage/input/telecom_usage.csv
+
+wc -l ~/usecases/telecom_customer_usage/input/telecom_usage.csv
+
+
+# ============================================================
+# 4. CREATE HDFS DIRECTORY
+# ============================================================
+
+hdfs dfs -mkdir -p /usecases/telecom_customer_usage/raw
+
+
+# ============================================================
+# 5. UPLOAD CSV TO HDFS
+# ============================================================
+
+hdfs dfs -put \
+~/usecases/telecom_customer_usage/input/telecom_usage.csv \
+/usecases/telecom_customer_usage/raw/
+
+
+# ============================================================
+# 6. VERIFY HDFS
+# ============================================================
+
+hdfs dfs -ls /usecases/telecom_customer_usage/raw
+
+
+# ============================================================
+# 7. CREATE RAW TABLE SQL SCRIPT
+# ============================================================
+
+nano ~/usecases/telecom_customer_usage/sql/01_create_telecom_raw_table.sql
+
+# Paste:
+
+CREATE DATABASE IF NOT EXISTS telecom_db;
+
+USE telecom_db;
+
+CREATE EXTERNAL TABLE IF NOT EXISTS telecom_usage_raw (
+    usage_id STRING,
+    customer_id STRING,
+    plan STRING,
+    call_minutes INT,
+    sms_count INT,
+    data_gb DOUBLE,
+    usage_date DATE,
+    circle STRING
+)
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY ','
+STORED AS TEXTFILE
+LOCATION '/usecases/telecom_customer_usage/raw'
+TBLPROPERTIES ("skip.header.line.count"="1");
+
+# Save:
+# Ctrl + O
+# Enter
+# Ctrl + X
+
+
+# ============================================================
+# 8. EXECUTE RAW TABLE SQL
+# ============================================================
+
+beeline -u 'jdbc:hive2://localhost:10001' \
+-f ~/usecases/telecom_customer_usage/sql/01_create_telecom_raw_table.sql
+
+
+# ============================================================
+# 9. VERIFY RAW TABLE
+# ============================================================
+
+beeline -u 'jdbc:hive2://localhost:10001' \
+-e "USE telecom_db; SHOW TABLES;"
+
+beeline -u 'jdbc:hive2://localhost:10001' \
+-e "USE telecom_db; SELECT COUNT(*) FROM telecom_usage_raw;"
+
+
+# ============================================================
+# 10. CREATE FINAL TABLE SQL SCRIPT
+# ============================================================
+
+nano ~/usecases/telecom_customer_usage/sql/02_create_telecom_final_table.sql
+
+# Paste:
+
+USE telecom_db;
+
+DROP TABLE IF EXISTS telecom_usage_final;
+
+CREATE TABLE telecom_usage_final AS
+SELECT
+    usage_id,
+    customer_id,
+    plan,
+    call_minutes,
+    sms_count,
+    data_gb,
+    usage_date,
+    circle,
+    CASE
+        WHEN data_gb >= 10 THEN 'HIGH'
+        ELSE 'NORMAL'
+    END AS usage_category
+FROM telecom_usage_raw;
+
+# Save:
+# Ctrl + O
+# Enter
+# Ctrl + X
+
+
+# ============================================================
+# 11. EXECUTE FINAL TABLE SQL
+# ============================================================
+
+beeline -u 'jdbc:hive2://localhost:10001' \
+-f ~/usecases/telecom_customer_usage/sql/02_create_telecom_final_table.sql
+
+
+# ============================================================
+# 12. VERIFY FINAL TABLE
+# ============================================================
+
+beeline -u 'jdbc:hive2://localhost:10001' \
+-e "USE telecom_db; SELECT COUNT(*) FROM telecom_usage_final;"
+
+beeline -u 'jdbc:hive2://localhost:10001' \
+-e "USE telecom_db; SELECT usage_id, data_gb, usage_category FROM telecom_usage_final ORDER BY usage_id;"
+
+beeline -u 'jdbc:hive2://localhost:10001' \
+-e "USE telecom_db; SELECT usage_category, COUNT(*) FROM telecom_usage_final GROUP BY usage_category;"
+
+
+# ============================================================
+# 13. CREATE AIRFLOW DAG
+# ============================================================
+
+nano ~/airflow/dags/telecom_usage_dag.py
+
+# Paste:
+
+from airflow import DAG
+from airflow.operators.bash import BashOperator
+from datetime import datetime
+
+with DAG(
+    dag_id="telecom_usage_etl",
+    start_date=datetime(2026, 10, 5),
+    schedule=None,
+    catchup=False
+) as dag:
+
+    upload_to_hdfs = BashOperator(
+        task_id="upload_to_hdfs",
+        bash_command="""
+        hdfs dfs -mkdir -p /usecases/telecom_customer_usage/raw
+
+        if hdfs dfs -test -e /usecases/telecom_customer_usage/raw/telecom_usage.csv
+        then
+            echo "File already exists in HDFS"
+        else
+            hdfs dfs -put /home/ganesh/usecases/telecom_customer_usage/input/telecom_usage.csv /usecases/telecom_customer_usage/raw/
+        fi
+        """,
+    )
+
+    create_raw_table = BashOperator(
+        task_id="create_raw_table",
+        bash_command="""
+        beeline -u 'jdbc:hive2://localhost:10001' \
+        -f /home/ganesh/usecases/telecom_customer_usage/sql/01_create_telecom_raw_table.sql
+        """,
+    )
+
+    create_final_table = BashOperator(
+        task_id="create_final_table",
+        bash_command="""
+        beeline -u 'jdbc:hive2://localhost:10001' \
+        -f /home/ganesh/usecases/telecom_customer_usage/sql/02_create_telecom_final_table.sql
+        """,
+    )
+
+    upload_to_hdfs >> create_raw_table >> create_final_table
+
+# Save:
+# Ctrl + O
+# Enter
+# Ctrl + X
+
+
+# ============================================================
+# 14. CHECK AIRFLOW DAG
+# ============================================================
+
+airflow dags list | grep telecom
+
+
+# ============================================================
+# 15. CHECK AIRFLOW TASKS
+# ============================================================
+
+airflow tasks list telecom_usage_etl
+
+
+# ============================================================
+# 16. TRIGGER AIRFLOW DAG
+# ============================================================
+
+airflow dags trigger telecom_usage_etl
+
+
+# ============================================================
+# 17. CHECK DAG RUNS
+# ============================================================
+
+airflow dags list-runs -d telecom_usage_etl
+
+
+# ============================================================
+# 18. VERIFY HDFS
+# ============================================================
+
+hdfs dfs -ls /usecases/telecom_customer_usage/raw
+
+
+# ============================================================
+# 19. VERIFY HIVE TABLES
+# ============================================================
+
+beeline -u 'jdbc:hive2://localhost:10001' \
+-e "USE telecom_db; SHOW TABLES;"
+
+
+# ============================================================
+# 20. VERIFY RAW RECORD COUNT
+# ============================================================
+
+beeline -u 'jdbc:hive2://localhost:10001' \
+-e "USE telecom_db; SELECT COUNT(*) FROM telecom_usage_raw;"
+
+
+# ============================================================
+# 21. VERIFY FINAL RECORD COUNT
+# ============================================================
+
+beeline -u 'jdbc:hive2://localhost:10001' \
+-e "USE telecom_db; SELECT COUNT(*) FROM telecom_usage_final;"
+
+
+# ============================================================
+# 22. VERIFY HIGH / NORMAL
+# ============================================================
+
+beeline -u 'jdbc:hive2://localhost:10001' \
+-e "USE telecom_db; SELECT usage_category, COUNT(*) FROM telecom_usage_final GROUP BY usage_category;"
+
+
+# Expected:
+# HIGH      6
+# NORMAL    9
