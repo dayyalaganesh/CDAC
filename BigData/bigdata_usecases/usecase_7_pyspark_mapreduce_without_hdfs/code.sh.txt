@@ -1,0 +1,232 @@
+#!/bin/bash
+
+# ============================================================
+# USE CASE: Employee Department Salary Analysis
+# Technology: PySpark RDD MapReduce
+# Hadoop/HDFS: NOT USED
+# ============================================================
+
+
+# ------------------------------------------------------------
+# 1. Create project directory
+# ------------------------------------------------------------
+
+mkdir -p ~/usecases/spark-mapreduce
+
+cd ~/usecases/spark-mapreduce
+
+
+# ------------------------------------------------------------
+# 2. Create input and output directories
+# ------------------------------------------------------------
+
+mkdir -p input
+mkdir -p output
+
+
+# ------------------------------------------------------------
+# 3. Create employee CSV input data
+# ------------------------------------------------------------
+
+cat > input/employee.csv << 'EOF'
+emp_id,name,department,salary
+101,Rahul,IT,60000
+102,Priya,HR,45000
+103,Arun,IT,70000
+104,Neha,Finance,55000
+105,Kiran,HR,50000
+106,Anita,Finance,65000
+107,Ravi,IT,80000
+EOF
+
+
+# ------------------------------------------------------------
+# 4. Create the existing PySpark MapReduce script
+# ------------------------------------------------------------
+
+cat > employee_salary.py << 'EOF'
+
+from pyspark import SparkConf, SparkContext
+
+
+# Create Spark configuration
+conf = SparkConf() \
+    .setAppName("EmployeeSalaryAnalysis") \
+    .setMaster("local[*]")
+
+
+# Create SparkContext
+sc = SparkContext(conf=conf)
+
+
+# --------------------------------------------------
+# Read local CSV file
+# --------------------------------------------------
+
+lines = sc.textFile(
+    "file:///home/ganesh/usecases/spark-mapreduce/input/employee.csv"
+)
+
+
+# --------------------------------------------------
+# Remove header
+# --------------------------------------------------
+
+header = lines.first()
+
+data = lines.filter(
+    lambda line: line != header
+)
+
+
+# --------------------------------------------------
+# Convert records into:
+#
+# department -> (employee_count, salary)
+# --------------------------------------------------
+
+department_data = data.map(
+    lambda line: (
+        line.split(",")[2],
+        (1, int(line.split(",")[3]))
+    )
+)
+
+
+# --------------------------------------------------
+# Reduce by department
+#
+# Add employee counts
+# Add salaries
+# --------------------------------------------------
+
+department_summary = department_data.reduceByKey(
+    lambda a, b: (
+        a[0] + b[0],
+        a[1] + b[1]
+    )
+)
+
+
+# --------------------------------------------------
+# Calculate average salary
+# --------------------------------------------------
+
+result = department_summary.map(
+    lambda x: (
+        x[0],
+        x[1][0],
+        x[1][1],
+        x[1][1] / x[1][0]
+    )
+)
+
+
+# --------------------------------------------------
+# Sort by department
+# --------------------------------------------------
+
+sorted_result = result.sortByKey()
+
+
+# --------------------------------------------------
+# Collect final result
+# --------------------------------------------------
+
+final_data = sorted_result.collect()
+
+
+# --------------------------------------------------
+# Display result
+# --------------------------------------------------
+
+print("\nDepartment Salary Analysis")
+print("--------------------------")
+
+for department, employee_count, total_salary, average_salary in final_data:
+
+    print(
+        department,
+        employee_count,
+        total_salary,
+        average_salary
+    )
+
+
+# --------------------------------------------------
+# Convert result to CSV format
+# --------------------------------------------------
+
+output_data = sorted_result.map(
+    lambda x: ",".join(map(str, x))
+)
+
+
+# --------------------------------------------------
+# Save result to LOCAL filesystem
+# --------------------------------------------------
+
+output_data \
+    .coalesce(1) \
+    .saveAsTextFile(
+        "file:///home/ganesh/usecases/spark-mapreduce/output/final"
+    )
+
+
+# Stop Spark
+sc.stop()
+
+EOF
+
+
+# ------------------------------------------------------------
+# 5. Remove previous output if it exists
+# ------------------------------------------------------------
+
+rm -rf output/final
+
+
+# ------------------------------------------------------------
+# 6. Run PySpark application
+# ------------------------------------------------------------
+
+echo ""
+echo "======================================"
+echo "Running Spark MapReduce Application"
+echo "======================================"
+
+spark-submit employee_salary.py
+
+
+# ------------------------------------------------------------
+# 7. Display generated files
+# ------------------------------------------------------------
+
+echo ""
+echo "======================================"
+echo "Output Directory"
+echo "======================================"
+
+ls -R output
+
+
+# ------------------------------------------------------------
+# 8. Display final result
+# ------------------------------------------------------------
+
+echo ""
+echo "======================================"
+echo "Final Result"
+echo "======================================"
+
+cat output/final/part-00000
+
+
+# ------------------------------------------------------------
+# 9. Finished
+# ------------------------------------------------------------
+
+echo ""
+echo "======================================"
+echo "Use Case Completed Successfully"
+echo "======================================"

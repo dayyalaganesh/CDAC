@@ -1,0 +1,11 @@
+~/usecases/spark-mapreduce/
+│
+├── employee_salary.py
+│
+├── input/
+│   └── employee.csv
+│
+└── output/
+    └── final/
+        ├── _SUCCESS
+        └── part-00000
